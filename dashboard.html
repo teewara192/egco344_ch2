@@ -210,6 +210,46 @@
             font-size: 12px;
         }
 
+        .province-sector-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .province-sector-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 15px;
+        }
+
+        .sector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .sector-item {
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+
+        .sector-name {
+            color: #666;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .sector-stat {
+            color: #667eea;
+            font-weight: 600;
+            margin: 2px 0;
+        }
+
         @media (max-width: 768px) {
             .dashboard-grid {
                 grid-template-columns: 1fr;
@@ -252,11 +292,19 @@
                 </div>
             </div>
 
-            <!-- Usage by Category -->
+            <!-- Usage by Category - Doughnut Chart -->
             <div class="chart-card">
-                <h2>Electricity Usage by Category (National Total)</h2>
+                <h2>Electricity Usage by Category - Distribution (National Total)</h2>
                 <div class="chart-container">
                     <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Usage Sector Breakdown - Pie Chart -->
+            <div class="chart-card">
+                <h2>Usage Sector Breakdown (National Total)</h2>
+                <div class="chart-container">
+                    <canvas id="sectorPieChart"></canvas>
                 </div>
             </div>
 
@@ -306,6 +354,37 @@
             <div class="chart-card">
                 <h2>Top Consuming Categories Nationwide</h2>
                 <div class="top-provinces" id="topCategories"></div>
+            </div>
+
+            <!-- Provincial Data Breakdown -->
+            <div class="chart-card">
+                <h2>Provincial Data Breakdown</h2>
+                <div class="controls">
+                    <input type="text" id="provinceSearchInput" placeholder="Search province..." style="padding: 10px 15px; border: 1px solid #ddd; border-radius: 5px; width: 100%; max-width: 300px; font-size: 14px;">
+                </div>
+                <div class="table-container">
+                    <table id="provinceBreakdownTable">
+                        <thead>
+                            <tr>
+                                <th>Province</th>
+                                <th>Residential Users</th>
+                                <th>Residential Usage (GWh)</th>
+                                <th>Business Users</th>
+                                <th>Business Usage (GWh)</th>
+                                <th>Total Users</th>
+                                <th>Total Usage (GWh)</th>
+                                <th>Avg Usage/User (kWh)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="provinceBreakdownBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Sector Breakdown by Province -->
+            <div class="chart-card">
+                <h2>Sector Breakdown Details by Province</h2>
+                <div id="provinceSectorBreakdown"></div>
             </div>
         </div>
     </div>
@@ -522,6 +601,47 @@
             });
         }
 
+        function createSectorPieChart() {
+            const totals = getCategoryTotals();
+            const colors = ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30b0fe', '#a8edea', '#fed6e3'];
+
+            const ctx = document.getElementById('sectorPieChart').getContext('2d');
+            if (charts.sectorPie) charts.sectorPie.destroy();
+
+            charts.sectorPie = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(totals),
+                    datasets: [{
+                        data: Object.values(totals).map(v => v / 1000000),
+                        backgroundColor: colors,
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return label + ': ' + value.toFixed(1) + ' GWh (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         function getUsersCategoryTotals() {
             const categories = {
                 'Residential': 'residential_count',
@@ -729,14 +849,135 @@
             }).join('');
         }
 
+        function populateProvinceBreakdownTable() {
+            const tableBody = document.getElementById('provinceBreakdownBody');
+            const searchInput = document.getElementById('provinceSearchInput');
+
+            function renderTable(data) {
+                tableBody.innerHTML = data.map(row => {
+                    const usersRow = usersData.find(u => u.province_code === row.province_code);
+                    
+                    const residentialUsers = usersRow?.residential_count || 0;
+                    const businessUsers = [
+                        usersRow?.small_business_count || 0,
+                        usersRow?.medium_business_count || 0,
+                        usersRow?.large_business_count || 0,
+                        usersRow?.specialized_business_count || 0,
+                        usersRow?.public_electricity_count || 0,
+                        usersRow?.government_state_enterprise_count || 0
+                    ].reduce((a, b) => a + b, 0);
+                    
+                    const totalUsers = residentialUsers + businessUsers;
+
+                    const residentialUsage = row.residential_kwh || 0;
+                    const businessUsage = [
+                        row.small_business_kwh || 0,
+                        row.medium_business_kwh || 0,
+                        row.large_business_kwh || 0,
+                        row.specialized_business_kwh || 0,
+                        row.public_electricity_kwh || 0,
+                        row.government_state_enterprise_kwh || 0
+                    ].reduce((a, b) => a + b, 0);
+                    
+                    const totalUsage = row.totalUsage || 0;
+                    const avgUsagePerUser = totalUsers > 0 ? totalUsage / totalUsers : 0;
+
+                    return `
+                        <tr>
+                            <td>${row.province_name}</td>
+                            <td>${formatNumber(residentialUsers)}</td>
+                            <td>${(residentialUsage / 1000000000).toFixed(2)}</td>
+                            <td>${formatNumber(businessUsers)}</td>
+                            <td>${(businessUsage / 1000000000).toFixed(2)}</td>
+                            <td>${formatNumber(totalUsers)}</td>
+                            <td>${(totalUsage / 1000000000).toFixed(2)}</td>
+                            <td>${formatNumber(avgUsagePerUser)}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            // Initial render
+            const sortedProvinces = usagesData.map(row => {
+                const totalUsage = [
+                    'residential_kwh', 'small_business_kwh', 'medium_business_kwh',
+                    'large_business_kwh', 'specialized_business_kwh', 'backup_power_kwh',
+                    'interruptible_rate_kwh', 'public_electricity_kwh',
+                    'government_state_enterprise_kwh', 'water_pumping_kwh',
+                    'temporary_electricity_kwh', 'ev_charging_kwh'
+                ].reduce((sum, col) => sum + (row[col] || 0), 0);
+                return { ...row, totalUsage };
+            }).sort((a, b) => b.totalUsage - a.totalUsage);
+
+            renderTable(sortedProvinces);
+
+            // Search functionality
+            searchInput.addEventListener('keyup', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                const filtered = sortedProvinces.filter(row =>
+                    row.province_name.toLowerCase().includes(searchTerm)
+                );
+                renderTable(filtered);
+            });
+        }
+
+        function displayProvinceSectorBreakdown() {
+            const container = document.getElementById('provinceSectorBreakdown');
+            const topProvinces = getTopProvinces(10);
+
+            const categoryLabels = [
+                { key: 'residential_kwh', label: 'Residential', icon: '🏠' },
+                { key: 'small_business_kwh', label: 'Small Business', icon: '🏪' },
+                { key: 'medium_business_kwh', label: 'Medium Business', icon: '🏢' },
+                { key: 'large_business_kwh', label: 'Large Business', icon: '🏗️' },
+                { key: 'specialized_business_kwh', label: 'Specialized Business', icon: '⚙️' },
+                { key: 'public_electricity_kwh', label: 'Public Electricity', icon: '🚦' },
+                { key: 'government_state_enterprise_kwh', label: 'Government/SE', icon: '🏛️' },
+                { key: 'water_pumping_kwh', label: 'Water Pumping', icon: '💧' },
+                { key: 'temporary_electricity_kwh', label: 'Temporary', icon: '⚡' },
+                { key: 'ev_charging_kwh', label: 'EV Charging', icon: '🔌' }
+            ];
+
+            container.innerHTML = topProvinces.map(province => {
+                const usersRow = usersData.find(u => u.province_code === province.province_code);
+
+                const sectorHTML = categoryLabels.map(cat => {
+                    const usageValue = province[cat.key] || 0;
+                    const usersKey = cat.key.replace('_kwh', '_count');
+                    const usersValue = usersRow ? (usersRow[usersKey] || 0) : 0;
+                    const avgUsage = usersValue > 0 ? usageValue / usersValue : 0;
+
+                    return `
+                        <div class="sector-item">
+                            <div class="sector-name">${cat.icon} ${cat.label}</div>
+                            <div class="sector-stat">Usage: ${formatNumberShort(usageValue / 1000)} GWh</div>
+                            <div style="color: #999; font-size: 11px; margin-top: 2px;">Users: ${formatNumber(usersValue)}</div>
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="province-sector-card">
+                        <div class="province-sector-title">📍 ${province.province_name}</div>
+                        <div class="sector-grid">
+                            ${sectorHTML}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
         function initializeDashboard() {
             displayStatistics();
             createTopProvincesChart();
             createCategoryChart();
+            createSectorPieChart();
             createUsersCategoryChart();
             populateProvinceSelect();
             populateTable();
             displayTopCategories();
+            populateProvinceBreakdownTable();
+            displayProvinceSectorBreakdown();
         }
 
         // Load data on page load
