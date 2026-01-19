@@ -237,6 +237,38 @@
       </div>
     </div>
 
+    <!-- YoY Growth Section -->
+    <div class="row">
+      <div class="col-lg-6">
+        <div class="card p-4">
+          <h5 class="card-title mb-4">📈 Fastest Growing Provinces (YoY%)</h5>
+          <div class="chart-container">
+            <canvas id="yoyGrowthChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card p-4">
+          <h5 class="card-title mb-4">🎯 Top Growing Provinces Details</h5>
+          <div class="table-responsive mt-2">
+            <table class="table table-hover breakdown-table">
+              <thead>
+                <tr>
+                  <th>Province</th>
+                  <th class="text-end">2566 (GWh)</th>
+                  <th class="text-end">2565 (GWh)</th>
+                  <th class="text-end">YoY Growth %</th>
+                  <th class="text-end">Status</th>
+                </tr>
+              </thead>
+              <tbody id="yoyGrowthTable">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Breakdown Section -->
     <div class="breakdown-section">
       <div class="card p-4">
@@ -462,6 +494,10 @@
       updateBizVsResChart(filteredUsage);
       updateEvChart(selectedProv);
 
+      // --- UPDATE YoY GROWTH (Always show all provinces comparison) ---
+      updateYoYGrowthChart();
+      updateYoYGrowthTable();
+
       // --- UPDATE BREAKDOWN TABLES ---
       updateProvinceBreakdownTable(filteredUsage);
       updateSectorBreakdownTable(filteredUsage, filteredUsers);
@@ -618,6 +654,802 @@
           responsive: true,
           maintainAspectRatio: false
         }
+      });
+    }
+
+    /**
+     * Calculate YoY Growth
+     * Compares 2566 vs 2565 usage to identify fastest growing provinces
+     */
+    function calculateYoYGrowth() {
+      const year2566 = usageData.filter(d => d.year === 2566);
+      const year2565 = usageData.filter(d => d.year === 2565);
+
+      // Create a map for 2565 data
+      const data2565Map = {};
+      year2565.forEach(d => {
+        const total = (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh + d.ev_charging_kwh) || 0;
+        data2565Map[d.province_name] = total;
+      });
+
+      // Calculate YoY growth for 2566
+      const yoyData = [];
+      year2566.forEach(d => {
+        const total2566 = (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh + d.ev_charging_kwh) || 0;
+        const total2565 = data2565Map[d.province_name] || 0;
+
+        if (total2565 > 0) {
+          const growthPct = ((total2566 - total2565) / total2565) * 100;
+          yoyData.push({
+            province_name: d.province_name,
+            usage2566: total2566,
+            usage2565: total2565,
+            growthPct: growthPct
+          });
+        }
+      });
+
+      // Sort by growth percentage descending
+      return yoyData.sort((a, b) => b.growthPct - a.growthPct);
+    }
+
+    /**
+     * Update YoY Growth Chart
+     * Bar chart showing fastest growing provinces
+     */
+    function updateYoYGrowthChart() {
+      const ctx = document.getElementById('yoyGrowthChart').getContext('2d');
+      const yoyData = calculateYoYGrowth();
+      
+      // Top 12 fastest growing
+      const topGrowing = yoyData.slice(0, 12);
+
+      const labels = topGrowing.map(d => d.province_name);
+      const growthValues = topGrowing.map(d => d.growthPct);
+
+      // Color coding: red for decline, yellow for low growth, green for high growth
+      const colors = growthValues.map(val => {
+        if (val < 0) return '#e74c3c'; // Red for decline
+        if (val < 5) return '#f39c12'; // Orange for low growth
+        if (val < 10) return '#f1c40f'; // Yellow for moderate growth
+        return '#2ecc71'; // Green for high growth
+      });
+
+      if (chartInstances.yoyGrowth) chartInstances.yoyGrowth.destroy();
+
+      chartInstances.yoyGrowth = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'YoY Growth (%)',
+            data: growthValues,
+            backgroundColor: colors,
+            borderRadius: 5
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Growth Percentage (%)' }
+            }
+          }
+        }
+      });
+    }
+
+    /**
+     * Update YoY Growth Table
+     * Displays top growing provinces with detailed metrics
+     */
+    function updateYoYGrowthTable() {
+      const tbody = document.getElementById('yoyGrowthTable');
+      tbody.innerHTML = '';
+
+      const yoyData = calculateYoYGrowth();
+
+      // Show top 10 fastest growing
+      yoyData.slice(0, 10).forEach((item, index) => {
+        const growth = item.growthPct;
+        let statusBadge = '';
+        let statusColor = '';
+
+        if (growth < 0) {
+          statusBadge = '📉 Declining';
+          statusColor = 'danger';
+        } else if (growth < 5) {
+          statusBadge = '📊 Slow Growth';
+          statusColor = 'warning';
+        } else if (growth < 10) {
+          statusBadge = '📈 Growing';
+          statusColor = 'info';
+        } else {
+          statusBadge = '🚀 Hotspot';
+          statusColor = 'success';
+        }
+
+        const row = `
+          <tr>
+            <td><strong>${index + 1}. ${item.province_name}</strong></td>
+            <td class="text-end">${fmtDec(item.usage2566 / 1000000)}</td>
+            <td class="text-end">${fmtDec(item.usage2565 / 1000000)}</td>
+            <td class="text-end"><strong class="text-${growth < 0 ? 'danger' : 'success'}">${fmtPct(growth)}%</strong></td>
+            <td class="text-end"><span class="badge bg-${statusColor}">${statusBadge}</span></td>
+          </tr>
+        `;
+        tbody.innerHTML += row;
+      });
+    }
+
+    /**
+     * Update Dashboard
+     * Main function to refresh all dashboard elements based on current filters
+     */
+    function updateDashboard() {
+      const selectedYear = parseInt(yearSelect.value);
+      const selectedProv = provinceSelect.value;
+
+      // Filter Data
+      let filteredUsage = usageData.filter(d => d.year === selectedYear);
+      let filteredUsers = userData.filter(d => d.year === selectedYear);
+
+      if (selectedProv !== 'all') {
+        filteredUsage = filteredUsage.filter(d => d.province_name === selectedProv);
+        filteredUsers = filteredUsers.filter(d => d.province_name === selectedProv);
+      }
+
+      // --- KPI CALCULATIONS ---
+      const totalUsage = filteredUsage.reduce((acc, curr) => {
+        return acc + (curr.residential_kwh || 0) + (curr.small_business_kwh || 0) +
+               (curr.medium_business_kwh || 0) + (curr.large_business_kwh || 0) +
+               (curr.specialized_business_kwh || 0) + (curr.ev_charging_kwh || 0);
+      }, 0);
+
+      const totalUsers = filteredUsers.reduce((acc, curr) => {
+        return acc + (curr.residential_count || 0) + (curr.small_business_count || 0) +
+               (curr.medium_business_count || 0) + (curr.large_business_count || 0);
+      }, 0);
+
+      // GWh Conversion
+      kpiUsage.innerText = fmtDec(totalUsage / 1000000);
+      kpiUsers.innerText = fmt(totalUsers);
+      kpiAvg.innerText = totalUsers > 0 ? fmtDec(totalUsage / totalUsers) : 0;
+
+      // --- UPDATE CHARTS ---
+      updateTopProvincesChart(filteredUsage);
+      updateSectorChart(filteredUsage);
+      updateBizVsResChart(filteredUsage);
+      updateEvChart(selectedProv);
+
+      // --- UPDATE YoY GROWTH (Always show all provinces comparison) ---
+      updateYoYGrowthChart();
+      updateYoYGrowthTable();
+
+      // --- UPDATE BREAKDOWN TABLES ---
+      updateProvinceBreakdownTable(filteredUsage);
+      updateSectorBreakdownTable(filteredUsage, filteredUsers);
+      updateSectorDistributionChart(filteredUsage);
+    }
+
+    /**
+     * Update Top Provinces Chart
+     * Bar chart showing top 10 provinces by usage
+     */
+    function updateTopProvincesChart(data) {
+      const ctx = document.getElementById('topProvincesChart').getContext('2d');
+
+      // Sort by total usage descending
+      const sorted = [...data].sort((a, b) => {
+        const totalA = a.residential_kwh + a.large_business_kwh;
+        const totalB = b.residential_kwh + b.large_business_kwh;
+        return totalB - totalA;
+      }).slice(0, 10); // Top 10
+
+      const labels = sorted.map(d => d.province_name);
+      const values = sorted.map(d => 
+        (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh) / 1000000
+      ); // GWh
+
+      if (chartInstances.topProv) chartInstances.topProv.destroy();
+
+      chartInstances.topProv = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Total Usage (GWh)',
+            data: values,
+            backgroundColor: '#3498db',
+            borderRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    /**
+     * Update Sector Chart
+     * Pie chart showing usage mix by sector
+     */
+    function updateSectorChart(data) {
+      const ctx = document.getElementById('sectorPieChart').getContext('2d');
+
+      let res = 0, small = 0, med = 0, large = 0, ev = 0;
+      
+      data.forEach(d => {
+        res += d.residential_kwh || 0;
+        small += d.small_business_kwh || 0;
+        med += d.medium_business_kwh || 0;
+        large += d.large_business_kwh || 0;
+        ev += d.ev_charging_kwh || 0;
+      });
+
+      if (chartInstances.sector) chartInstances.sector.destroy();
+
+      chartInstances.sector = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Residential', 'Small Biz', 'Medium Biz', 'Large Biz', 'EV Charging'],
+          datasets: [{
+            data: [res, small, med, large, ev],
+            backgroundColor: ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6']
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right' }
+          }
+        }
+      });
+    }
+
+    /**
+     * Update Business vs Residential Chart
+     * Bar chart comparing business and residential usage
+     */
+    function updateBizVsResChart(data) {
+      const ctx = document.getElementById('bizVsResChart').getContext('2d');
+
+      // Aggregate if multiple provinces, otherwise single
+      let resTotal = 0;
+      let bizTotal = 0;
+
+      data.forEach(d => {
+        resTotal += d.residential_kwh || 0;
+        bizTotal += (d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh) || 0;
+      });
+
+      if (chartInstances.bizRes) chartInstances.bizRes.destroy();
+
+      chartInstances.bizRes = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Aggregated Selection'],
+          datasets: [
+            { label: 'Residential', data: [resTotal / 1000000], backgroundColor: '#2ecc71' },
+            { label: 'Business (All types)', data: [bizTotal / 1000000], backgroundColor: '#34495e' }
+          ]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { x: { title: { display: true, text: 'GWh' } } }
+        }
+      });
+    }
+
+    /**
+     * Update EV Charging Chart
+     * Line chart showing EV charging trends over years
+     */
+    function updateEvChart(province) {
+      const ctx = document.getElementById('evChart').getContext('2d');
+
+      // Get trend over years (2564, 2565, 2566)
+      const years = [2564, 2565, 2566];
+      const evData = years.map(y => {
+        let filtered = usageData.filter(d => d.year === y);
+        if (province !== 'all') {
+          filtered = filtered.filter(d => d.province_name === province);
+        }
+        return filtered.reduce((acc, curr) => acc + (curr.ev_charging_kwh || 0), 0);
+      });
+
+      if (chartInstances.ev) chartInstances.ev.destroy();
+
+      chartInstances.ev = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: years,
+          datasets: [{
+            label: 'EV Charging Usage (kWh)',
+            data: evData,
+            borderColor: '#9b59b6',
+            backgroundColor: 'rgba(155, 89, 182, 0.2)',
+            fill: true,
+            tension: 0.4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false
+        }
+      });
+    }
+
+    /**
+     * Calculate YoY Growth
+     * Compares 2566 vs 2565 usage to identify fastest growing provinces
+     */
+    function calculateYoYGrowth() {
+      const year2566 = usageData.filter(d => d.year === 2566);
+      const year2565 = usageData.filter(d => d.year === 2565);
+
+      // Create a map for 2565 data
+      const data2565Map = {};
+      year2565.forEach(d => {
+        const total = (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh + d.ev_charging_kwh) || 0;
+        data2565Map[d.province_name] = total;
+      });
+
+      // Calculate YoY growth for 2566
+      const yoyData = [];
+      year2566.forEach(d => {
+        const total2566 = (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh + d.ev_charging_kwh) || 0;
+        const total2565 = data2565Map[d.province_name] || 0;
+
+        if (total2565 > 0) {
+          const growthPct = ((total2566 - total2565) / total2565) * 100;
+          yoyData.push({
+            province_name: d.province_name,
+            usage2566: total2566,
+            usage2565: total2565,
+            growthPct: growthPct
+          });
+        }
+      });
+
+      // Sort by growth percentage descending
+      return yoyData.sort((a, b) => b.growthPct - a.growthPct);
+    }
+
+    /**
+     * Update YoY Growth Chart
+     * Bar chart showing fastest growing provinces
+     */
+    function updateYoYGrowthChart() {
+      const ctx = document.getElementById('yoyGrowthChart').getContext('2d');
+      const yoyData = calculateYoYGrowth();
+      
+      // Top 12 fastest growing
+      const topGrowing = yoyData.slice(0, 12);
+
+      const labels = topGrowing.map(d => d.province_name);
+      const growthValues = topGrowing.map(d => d.growthPct);
+
+      // Color coding: red for decline, yellow for low growth, green for high growth
+      const colors = growthValues.map(val => {
+        if (val < 0) return '#e74c3c'; // Red for decline
+        if (val < 5) return '#f39c12'; // Orange for low growth
+        if (val < 10) return '#f1c40f'; // Yellow for moderate growth
+        return '#2ecc71'; // Green for high growth
+      });
+
+      if (chartInstances.yoyGrowth) chartInstances.yoyGrowth.destroy();
+
+      chartInstances.yoyGrowth = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'YoY Growth (%)',
+            data: growthValues,
+            backgroundColor: colors,
+            borderRadius: 5
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Growth Percentage (%)' }
+            }
+          }
+        }
+      });
+    }
+
+    /**
+     * Update YoY Growth Table
+     * Displays top growing provinces with detailed metrics
+     */
+    function updateYoYGrowthTable() {
+      const tbody = document.getElementById('yoyGrowthTable');
+      tbody.innerHTML = '';
+
+      const yoyData = calculateYoYGrowth();
+
+      // Show top 10 fastest growing
+      yoyData.slice(0, 10).forEach((item, index) => {
+        const growth = item.growthPct;
+        let statusBadge = '';
+        let statusColor = '';
+
+        if (growth < 0) {
+          statusBadge = '📉 Declining';
+          statusColor = 'danger';
+        } else if (growth < 5) {
+          statusBadge = '📊 Slow Growth';
+          statusColor = 'warning';
+        } else if (growth < 10) {
+          statusBadge = '📈 Growing';
+          statusColor = 'info';
+        } else {
+          statusBadge = '🚀 Hotspot';
+          statusColor = 'success';
+        }
+
+        const row = `
+          <tr>
+            <td><strong>${index + 1}. ${item.province_name}</strong></td>
+            <td class="text-end">${fmtDec(item.usage2566 / 1000000)}</td>
+            <td class="text-end">${fmtDec(item.usage2565 / 1000000)}</td>
+            <td class="text-end"><strong class="text-${growth < 0 ? 'danger' : 'success'}">${fmtPct(growth)}%</strong></td>
+            <td class="text-end"><span class="badge bg-${statusColor}">${statusBadge}</span></td>
+          </tr>
+        `;
+        tbody.innerHTML += row;
+      });
+    }
+
+    /**
+     * Update Dashboard
+     * Main function to refresh all dashboard elements based on current filters
+     */
+    function updateDashboard() {
+      const selectedYear = parseInt(yearSelect.value);
+      const selectedProv = provinceSelect.value;
+
+      // Filter Data
+      let filteredUsage = usageData.filter(d => d.year === selectedYear);
+      let filteredUsers = userData.filter(d => d.year === selectedYear);
+
+      if (selectedProv !== 'all') {
+        filteredUsage = filteredUsage.filter(d => d.province_name === selectedProv);
+        filteredUsers = filteredUsers.filter(d => d.province_name === selectedProv);
+      }
+
+      // --- KPI CALCULATIONS ---
+      const totalUsage = filteredUsage.reduce((acc, curr) => {
+        return acc + (curr.residential_kwh || 0) + (curr.small_business_kwh || 0) +
+               (curr.medium_business_kwh || 0) + (curr.large_business_kwh || 0) +
+               (curr.specialized_business_kwh || 0) + (curr.ev_charging_kwh || 0);
+      }, 0);
+
+      const totalUsers = filteredUsers.reduce((acc, curr) => {
+        return acc + (curr.residential_count || 0) + (curr.small_business_count || 0) +
+               (curr.medium_business_count || 0) + (curr.large_business_count || 0);
+      }, 0);
+
+      // GWh Conversion
+      kpiUsage.innerText = fmtDec(totalUsage / 1000000);
+      kpiUsers.innerText = fmt(totalUsers);
+      kpiAvg.innerText = totalUsers > 0 ? fmtDec(totalUsage / totalUsers) : 0;
+
+      // --- UPDATE CHARTS ---
+      updateTopProvincesChart(filteredUsage);
+      updateSectorChart(filteredUsage);
+      updateBizVsResChart(filteredUsage);
+      updateEvChart(selectedProv);
+
+      // --- UPDATE YoY GROWTH (Always show all provinces comparison) ---
+      updateYoYGrowthChart();
+      updateYoYGrowthTable();
+
+      // --- UPDATE BREAKDOWN TABLES ---
+      updateProvinceBreakdownTable(filteredUsage);
+      updateSectorBreakdownTable(filteredUsage, filteredUsers);
+      updateSectorDistributionChart(filteredUsage);
+    }
+
+    /**
+     * Update Top Provinces Chart
+     * Bar chart showing top 10 provinces by usage
+     */
+    function updateTopProvincesChart(data) {
+      const ctx = document.getElementById('topProvincesChart').getContext('2d');
+
+      // Sort by total usage descending
+      const sorted = [...data].sort((a, b) => {
+        const totalA = a.residential_kwh + a.large_business_kwh;
+        const totalB = b.residential_kwh + b.large_business_kwh;
+        return totalB - totalA;
+      }).slice(0, 10); // Top 10
+
+      const labels = sorted.map(d => d.province_name);
+      const values = sorted.map(d => 
+        (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh) / 1000000
+      ); // GWh
+
+      if (chartInstances.topProv) chartInstances.topProv.destroy();
+
+      chartInstances.topProv = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Total Usage (GWh)',
+            data: values,
+            backgroundColor: '#3498db',
+            borderRadius: 5
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    /**
+     * Update Sector Chart
+     * Pie chart showing usage mix by sector
+     */
+    function updateSectorChart(data) {
+      const ctx = document.getElementById('sectorPieChart').getContext('2d');
+
+      let res = 0, small = 0, med = 0, large = 0, ev = 0;
+      
+      data.forEach(d => {
+        res += d.residential_kwh || 0;
+        small += d.small_business_kwh || 0;
+        med += d.medium_business_kwh || 0;
+        large += d.large_business_kwh || 0;
+        ev += d.ev_charging_kwh || 0;
+      });
+
+      if (chartInstances.sector) chartInstances.sector.destroy();
+
+      chartInstances.sector = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Residential', 'Small Biz', 'Medium Biz', 'Large Biz', 'EV Charging'],
+          datasets: [{
+            data: [res, small, med, large, ev],
+            backgroundColor: ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6']
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'right' }
+          }
+        }
+      });
+    }
+
+    /**
+     * Update Business vs Residential Chart
+     * Bar chart comparing business and residential usage
+     */
+    function updateBizVsResChart(data) {
+      const ctx = document.getElementById('bizVsResChart').getContext('2d');
+
+      // Aggregate if multiple provinces, otherwise single
+      let resTotal = 0;
+      let bizTotal = 0;
+
+      data.forEach(d => {
+        resTotal += d.residential_kwh || 0;
+        bizTotal += (d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh) || 0;
+      });
+
+      if (chartInstances.bizRes) chartInstances.bizRes.destroy();
+
+      chartInstances.bizRes = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Aggregated Selection'],
+          datasets: [
+            { label: 'Residential', data: [resTotal / 1000000], backgroundColor: '#2ecc71' },
+            { label: 'Business (All types)', data: [bizTotal / 1000000], backgroundColor: '#34495e' }
+          ]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: { x: { title: { display: true, text: 'GWh' } } }
+        }
+      });
+    }
+
+    /**
+     * Update EV Charging Chart
+     * Line chart showing EV charging trends over years
+     */
+    function updateEvChart(province) {
+      const ctx = document.getElementById('evChart').getContext('2d');
+
+      // Get trend over years (2564, 2565, 2566)
+      const years = [2564, 2565, 2566];
+      const evData = years.map(y => {
+        let filtered = usageData.filter(d => d.year === y);
+        if (province !== 'all') {
+          filtered = filtered.filter(d => d.province_name === province);
+        }
+        return filtered.reduce((acc, curr) => acc + (curr.ev_charging_kwh || 0), 0);
+      });
+
+      if (chartInstances.ev) chartInstances.ev.destroy();
+
+      chartInstances.ev = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: years,
+          datasets: [{
+            label: 'EV Charging Usage (kWh)',
+            data: evData,
+            borderColor: '#9b59b6',
+            backgroundColor: 'rgba(155, 89, 182, 0.2)',
+            fill: true,
+            tension: 0.4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false
+        }
+      });
+    }
+
+    /**
+     * Calculate YoY Growth
+     * Compares 2566 vs 2565 usage to identify fastest growing provinces
+     */
+    function calculateYoYGrowth() {
+      const year2566 = usageData.filter(d => d.year === 2566);
+      const year2565 = usageData.filter(d => d.year === 2565);
+
+      // Create a map for 2565 data
+      const data2565Map = {};
+      year2565.forEach(d => {
+        const total = (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh + d.ev_charging_kwh) || 0;
+        data2565Map[d.province_name] = total;
+      });
+
+      // Calculate YoY growth for 2566
+      const yoyData = [];
+      year2566.forEach(d => {
+        const total2566 = (d.residential_kwh + d.small_business_kwh + d.medium_business_kwh + d.large_business_kwh + d.ev_charging_kwh) || 0;
+        const total2565 = data2565Map[d.province_name] || 0;
+
+        if (total2565 > 0) {
+          const growthPct = ((total2566 - total2565) / total2565) * 100;
+          yoyData.push({
+            province_name: d.province_name,
+            usage2566: total2566,
+            usage2565: total2565,
+            growthPct: growthPct
+          });
+        }
+      });
+
+      // Sort by growth percentage descending
+      return yoyData.sort((a, b) => b.growthPct - a.growthPct);
+    }
+
+    /**
+     * Update YoY Growth Chart
+     * Bar chart showing fastest growing provinces
+     */
+    function updateYoYGrowthChart() {
+      const ctx = document.getElementById('yoyGrowthChart').getContext('2d');
+      const yoyData = calculateYoYGrowth();
+      
+      // Top 12 fastest growing
+      const topGrowing = yoyData.slice(0, 12);
+
+      const labels = topGrowing.map(d => d.province_name);
+      const growthValues = topGrowing.map(d => d.growthPct);
+
+      // Color coding: red for decline, yellow for low growth, green for high growth
+      const colors = growthValues.map(val => {
+        if (val < 0) return '#e74c3c'; // Red for decline
+        if (val < 5) return '#f39c12'; // Orange for low growth
+        if (val < 10) return '#f1c40f'; // Yellow for moderate growth
+        return '#2ecc71'; // Green for high growth
+      });
+
+      if (chartInstances.yoyGrowth) chartInstances.yoyGrowth.destroy();
+
+      chartInstances.yoyGrowth = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'YoY Growth (%)',
+            data: growthValues,
+            backgroundColor: colors,
+            borderRadius: 5
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Growth Percentage (%)' }
+            }
+          }
+        }
+      });
+    }
+
+    /**
+     * Update YoY Growth Table
+     * Displays top growing provinces with detailed metrics
+     */
+    function updateYoYGrowthTable() {
+      const tbody = document.getElementById('yoyGrowthTable');
+      tbody.innerHTML = '';
+
+      const yoyData = calculateYoYGrowth();
+
+      // Show top 10 fastest growing
+      yoyData.slice(0, 10).forEach((item, index) => {
+        const growth = item.growthPct;
+        let statusBadge = '';
+        let statusColor = '';
+
+        if (growth < 0) {
+          statusBadge = '📉 Declining';
+          statusColor = 'danger';
+        } else if (growth < 5) {
+          statusBadge = '📊 Slow Growth';
+          statusColor = 'warning';
+        } else if (growth < 10) {
+          statusBadge = '📈 Growing';
+          statusColor = 'info';
+        } else {
+          statusBadge = '🚀 Hotspot';
+          statusColor = 'success';
+        }
+
+        const row = `
+          <tr>
+            <td><strong>${index + 1}. ${item.province_name}</strong></td>
+            <td class="text-end">${fmtDec(item.usage2566 / 1000000)}</td>
+            <td class="text-end">${fmtDec(item.usage2565 / 1000000)}</td>
+            <td class="text-end"><strong class="text-${growth < 0 ? 'danger' : 'success'}">${fmtPct(growth)}%</strong></td>
+            <td class="text-end"><span class="badge bg-${statusColor}">${statusBadge}</span></td>
+          </tr>
+        `;
+        tbody.innerHTML += row;
       });
     }
 
